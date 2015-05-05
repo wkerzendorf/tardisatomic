@@ -7,14 +7,27 @@ from tardisatomic.alchemy import Ion, Atom, Level, Transition, TransitionType, \
     TransitionValue, TransitionValueType
 from sqlalchemy.orm import aliased
 import pandas as pd
-
+import sys
+import platform
+import hashlib
+import os
+import gnupg
+from time import gmtime, strftime
 
 class BaseAtomicDatabase(object):
     __metaclass__ = ABCMeta
 
+    atomic_db = None
+
     def _to_data_frame(self, sql_data):
         rec_data = [rec.__dict__ for rec in sql_data]
         return pd.DataFrame.from_records(rec_data)
+
+    #ToDO:Finish that
+
+    @atomic_db.setter
+    def atomic_db(self, value):
+        self.atomic_db =  value
 
 
 class Atoms(atomic_plugins.Atoms, BaseAtomicDatabase):
@@ -54,7 +67,7 @@ class Levels(atomic_plugins.Levels, BaseAtomicDatabase):
         level_data = self.atomic_db.session.query(Level, Ion, Atom).join(
             "ion", "atom").values(Atom.atomic_number, Ion.ion_number,
                                   Level.level_number, Level.g, Level.energy)
-        self.data = self._to_data_frame(level_data)
+        self.dgnupgata = self._to_data_frame(level_data)
 
 
 class Transitions(atomic_plugins.Transitions, BaseAtomicDatabase):
@@ -122,3 +135,101 @@ class Transitions(atomic_plugins.Transitions, BaseAtomicDatabase):
             self.line_transitions.apply(lambda x:
                                         np.power(10, x['loggf']) / x['g_lower'])
         self.data = self.line_transitions
+
+
+class CreateHDF(object):
+    def __init__(self, atom_db, hdf_file_or_buf ,exclude_species=[],
+                 max_ionization_level=np.inf, \
+                                                              transition_types=['lines']):
+        """
+        Creates the HDF file for TARDIS from the atomic database.
+
+        :param atom_db: The AtomicDatabase object from
+        tardisatomic.base containing all atomic data.
+
+        :param exclude_species: Specifies the specie by atomic number which
+        are exclude from the atomic data set. By default all species are
+        included.
+
+        :param max_ionization_level: Specifies the highest ionization level
+        included in the atomic data set. All higher ionization levels are
+        excluded. By default all ionization levels are included.
+
+        :param transition_types: Specifies the transition types included in
+        the atomic data set. Default: line
+        """
+
+        self.atomic_db = atom_db
+        self.exclude_species = exclude_species
+        self.max_ionization_level = max_ionization_level
+        self.transition_types = transition_types
+
+        atomic_plugins = self.__create_atomic_objects()
+
+
+
+    def __create_atomic_objects(self):
+
+        atomic_plugins ={x.hdf_name: x(exclude_species=self.exclude_species,
+                                       max_ionization_level=
+                                       self.max_ionization_level,
+                                       transition_types =self.transition_types
+                                       ) for x in
+                         BaseAtomicDatabase.__subclasses__()}
+
+        return atomic_plugins
+
+    def __load_atomic_data(self,atomic_plugins):
+
+        for key in atomic_plugins:
+            try:
+                atomic_plugins[key].load_sql()
+            except:
+                print("Unexpected error in {0}: {1} ".format(key,
+                                                             sys.exc_info()[0]))
+
+
+
+    def close_hdf(self,hdf_buf, anonymous=False):
+        if not anonymous:
+            uname = platform.uname()
+            user = os.getusername()
+        else:
+            uname = 'anonymous'
+            user = 'anonymous'
+        ctime = strftime("%Y-%m-%d %H:%M:%S", gmtime())
+        md5_hash = hashlib.md5()
+
+        gpg = gnupg.GPG()
+        gpg.encoding = 'utf-8'
+
+        hdf_buf.put('metadata/system', uname)
+        hdf_buf.put('metadata/username', user)
+        hdf_buf.put('metadata/creation_time', ctime)
+
+        for dataset in hdf_buf.values():
+            md5_hash.update(dataset.value.data)
+
+        data_to_sign = "TARDISATOMIC\n" "creation_time: " + ctime+ "\n" + \
+            "System:\n" + \
+                       uname +"\n"+ "User: " \
+                                                                      "" + \
+                       user + "\n" + "md5: " + md5_hash + "\n"
+        signed_data = gpg.sign(data_to_sign)
+
+        hdf_buf.put('metadata/gpg',  signed_data.data)
+        hdf_buf.put('metadata/md5',md5_hash.hexdigest() )
+        hdf_buf.close()
+
+
+
+
+
+
+
+
+
+
+
+
+
