@@ -1,13 +1,12 @@
-from tardis.atomic import plugins as atomic_plugins
+from abc import ABCMeta
 
-from tardisatomic.alchemy import Ion, Atom, Level, Transition, TransitionType, \
-    TransitionValue, TransitionValueType
-
-from sqlalchemy.orm import aliased
-import pandas as pd
 import numpy as np
 
-from abc import ABCMeta, abstractproperty, abstractmethod
+from tardis.atomic import plugins as atomic_plugins
+from tardisatomic.alchemy import Ion, Atom, Level, Transition, TransitionType, \
+    TransitionValue, TransitionValueType
+from sqlalchemy.orm import aliased
+import pandas as pd
 
 
 class BaseAtomicDatabase(object):
@@ -19,7 +18,6 @@ class BaseAtomicDatabase(object):
 
 
 class Atoms(atomic_plugins.Atoms, BaseAtomicDatabase):
-
     def __init__(self, **kwargs):
         self.exclude_species = kwargs.get('exclude_species', [])
 
@@ -30,7 +28,6 @@ class Atoms(atomic_plugins.Atoms, BaseAtomicDatabase):
 
 
 class Ions(atomic_plugins.Ions, BaseAtomicDatabase):
-
     def __init__(self, **kwargs):
         self.exclude_species = kwargs.get('exclude_species', [])
         self.max_ionization_energy = kwargs.get('max_ionization_energy', np.inf)
@@ -49,7 +46,6 @@ class Ions(atomic_plugins.Ions, BaseAtomicDatabase):
 
 class Levels(atomic_plugins.Levels, BaseAtomicDatabase):
     def __init__(self, **kwargs):
-
         self.exclude_species = kwargs.get('exclude_species', [])
         self.max_ionization_energy = kwargs.get('max_ionization_energy', np.inf)
 
@@ -72,30 +68,33 @@ class Transitions(atomic_plugins.Transitions, BaseAtomicDatabase):
         source_level = aliased(Level)
         trans_a = aliased(Transition)
         trans_b = aliased(Transition)
-        trans_data = self.atomic_db.session.query(TransitionValue,
-                                                  TransitionValue.value,
-                                                  Transition,
-                                                  Transition.id.label(
-                                                      "transition_id"),
-                                                  target_level.id.label(
-                                                      "target_level_id"),
-                                                  source_level.id.label(
-                                                      "source_level_id"),
-                                                  target_level.level_number.label(
-                                                      "target_level_number"),
-                                                  source_level.level_number.label(
-                                                      "source_level_number"),
-                                                  source_level.g.label(
-                                                      'g_lower'),
-                                                  target_level.g.label(
-                                                      'g_upper'),
-                                                  TransitionType.name,
-                                                  TransitionValueType.name
-                                                  ).join(Transition).join(
-            target_level,
-            Transition.target_level_id == target_level.id).join(source_level,
-                                                                Transition.target_level_id == source_level.id).join(
-            TransitionType).filter(TransitionType.name == 'Line')
+        trans_data = \
+            self.atomic_db.session.query(TransitionValue,
+                                         TransitionValue.value,
+                                         Transition,
+                                         Transition.id.label(
+                                             "transition_id"),
+                                         target_level.id.label(
+                                             "target_level_id"),
+                                         source_level.id.label(
+                                             "source_level_id"),
+                                         target_level.level_number.label(
+                                             "target_level_number"),
+                                         source_level.level_number.label(
+                                             "source_level_number"),
+                                         source_level.g.label(
+                                             'g_lower'),
+                                         target_level.g.label(
+                                             'g_upper'),
+                                         TransitionType.name,
+                                         TransitionValueType.name
+                                         ).join(Transition).join(
+                target_level,
+                Transition.target_level_id == target_level.id).join(
+                source_level,
+                Transition.target_level_id == source_level.id
+                ).join(
+                TransitionType).filter(TransitionType.name == 'Line')
 
         raw_line_transitions = self._to_data_frame(trans_data)
         raw_line_transitions.drop('Transition', axis=1, inplace=True)
@@ -104,28 +103,22 @@ class Transitions(atomic_plugins.Transitions, BaseAtomicDatabase):
                                                               'name'] ==
                                                           'wavelength']
 
-        raw_line_transitions_wl.rename(columns={'value':'wavelength'},inplace=True)
+        raw_line_transitions_wl.rename(columns={'value': 'wavelength'},
+                                       inplace=True)
         raw_line_transitions_loggf = raw_line_transitions.ix[
             raw_line_transitions[
                 'name'] == 'loggf']
-        raw_line_transitions_loggf.rename(columns={'value':'loggf'},inplace=True)
+        raw_line_transitions_loggf.rename(columns={'value': 'loggf'},
+                                          inplace=True)
         self.line_transitions = pd.merge(raw_line_transitions_loggf[[
             'transition_id', 'loggf']],
-                raw_line_transitions_wl,
-         on='transition_id')
+                                         raw_line_transitions_wl,
+                                         on='transition_id')
 
-        self.line_transitions['f_ul'] = self.line_transitions.apply(lambda x:
-                                                                    np.power(
-                                                                        10,
-                                                                        x[
-                                                                            'loggf'])/x['g_upper'])
-        self.line_transitions['f_lu'] = self.line_transitions.apply(lambda x:
-                                                                    np.power(
-                                                                        10,
-                                                                        x[
-                                                                            'loggf'])/x['g_lower'])
+        self.line_transitions['f_ul'] = \
+            self.line_transitions.apply(lambda x:
+                                        np.power(10, x['loggf']) / x['g_upper'])
+        self.line_transitions['f_lu'] = \
+            self.line_transitions.apply(lambda x:
+                                        np.power(10, x['loggf']) / x['g_lower'])
         self.data = self.line_transitions
-
-
-
-
